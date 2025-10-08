@@ -1086,9 +1086,9 @@ version = "0.5.16"
 
 [[deps.ManifoldDiff]]
 deps = ["ADTypes", "DifferentiationInterface", "LinearAlgebra", "ManifoldsBase", "Markdown", "Random", "Requires"]
-git-tree-sha1 = "71c0198fc1aaf21048dfc1fb1f63e5aaa975977c"
+git-tree-sha1 = "28c69b401c75dd3f3b34a39bb7cb7948a2aeb61d"
 uuid = "af67fdf4-a580-4b9f-bbec-742ef357defd"
-version = "0.4.4"
+version = "0.4.5"
 
     [deps.ManifoldDiff.weakdeps]
     FiniteDiff = "6a86dc24-6348-571c-b903-95158fe2bd41"
