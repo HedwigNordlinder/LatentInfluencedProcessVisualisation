@@ -264,6 +264,119 @@ function plot_histogram_evolution_gif(tvec, xttraj, distribution;
 end
 
 """
+    plot_histogram_evolution_gif(tvec::AbstractVector, frames::AbstractVector, distribution; kwargs...)
+
+Overload that accepts a vector of time points and a time-major vector of frames, where
+each element corresponds to all samples observed at that time index. Each frame can be
+either a vector of length N (1D state) or a matrix with a singleton dimension and N samples
+(`1×N` or `N×1`). This preserves the original functionality that accepts a `(1, N, T)` array.
+"""
+function plot_histogram_evolution_gif(tvec::AbstractVector, frames::AbstractVector, distribution; 
+                                      filename="histogram_evolution.gif",
+                                      fps=10,
+                                      n_points=200,
+                                      xlim=nothing,
+                                      hist_color=:blue,
+                                      true_color=:red,
+                                      hist_label="Histogram",
+                                      true_label="True Density",
+                                      linewidth=2,
+                                      alpha=0.7,
+                                      bins=100,
+                                      normalize=:pdf,
+                                      title_prefix="t = ",
+                                      every_n_frames=1)
+    n_timesteps = length(tvec)
+    if length(frames) != n_timesteps
+        error("Length mismatch: length(tvec) = $(length(tvec)) but length(frames) = $(length(frames))")
+    end
+
+    # Helper to convert an input frame to a vector of values
+    frame_values = function(frame)
+        if frame isa AbstractMatrix
+            return vec(frame)
+        elseif frame isa AbstractVector
+            return frame
+        else
+            error("Unsupported frame type: $(typeof(frame)). Expected Vector or Matrix with singleton dimension.")
+        end
+    end
+
+    # Determine x-axis limits from all data
+    if xlim === nothing
+        # Initialize with first frame's extrema
+        v = frame_values(frames[1])
+        data_min, data_max = extrema(v)
+        for i in 2:n_timesteps
+            vi = frame_values(frames[i])
+            vmin, vmax = extrema(vi)
+            if vmin < data_min
+                data_min = vmin
+            end
+            if vmax > data_max
+                data_max = vmax
+            end
+        end
+        margin = 0.1 * (data_max - data_min)
+        x_min = data_min - margin
+        x_max = data_max + margin
+    else
+        x_min, x_max = xlim
+    end
+
+    # Create evaluation points for true density
+    x_eval = range(x_min, x_max, length=n_points)
+    true_density = pdf.(distribution, x_eval)
+
+    # Calculate freeze frames
+    freeze_frames = Int(round(3 * fps))
+
+    # Create animation with freeze frames
+    anim = @animate for frame_idx in 1:(length(1:every_n_frames:n_timesteps) + freeze_frames)
+        if frame_idx <= length(1:every_n_frames:n_timesteps)
+            # Regular animation frames
+            i = (frame_idx - 1) * every_n_frames + 1
+            current_points = frame_values(frames[i])
+            current_time = tvec[i]
+        else
+            # Freeze frames (last frame repeated)
+            i = n_timesteps
+            current_points = frame_values(frames[i])
+            current_time = tvec[i]
+        end
+
+        # Create plot
+        p = plot(xlabel="Value", 
+                 ylabel="Density",
+                 legend=:topright,
+                 linewidth=linewidth,
+                 title="$(title_prefix)$(round(current_time, digits=3))",
+                 xlim=(x_min, x_max))
+
+        # Plot histogram
+        histogram!(p, current_points, 
+                  alpha=alpha, 
+                  color=hist_color, 
+                  label=hist_label,
+                  normalize=normalize,
+                  bins=bins)
+
+        # Plot true density
+        plot!(p, x_eval, true_density, 
+              color=true_color, 
+              label=true_label,
+              linewidth=linewidth,
+              linestyle=:dash)
+    end
+
+    # Save as GIF
+    gif(anim, filename, fps=fps)
+
+    println("GIF saved as: $filename")
+    return anim
+end
+
+"""
     plot_trajectories(conditional_path_times, conditional_path_states; kwargs...)
 
 Plots trajectories from conditional path data structure where each trajectory has its own time and state vectors.
@@ -340,17 +453,97 @@ function plot_trajectories_conditional(conditional_path_times::Vector{Vector{Flo
 end
 
 # The original plot_trajectories function is now renamed to avoid conflicts
+"""
+    plot_trajectories_standard(tvec::AbstractVector, frames::AbstractVector; kwargs...)
+
+Overload that accepts a vector of time points and a time-major vector of frames, where
+each element corresponds to all samples observed at that time index. Each frame can be
+either a vector of length N (1D state) or a matrix with a singleton dimension and N samples
+(`1×N` or `N×1`). This preserves the original functionality that accepts a `(1, N, T)` array.
+"""
+function plot_trajectories_standard(tvec::AbstractVector, frames::AbstractVector; 
+                          n_plot=50,
+                          alpha=0.3,
+                          linewidth=1,
+                          color=:blue,
+                          legend=false)
+    n_timesteps = length(tvec)
+    if length(frames) != n_timesteps
+        error("Length mismatch: length(tvec) = $(length(tvec)) but length(frames) = $(length(frames))")
+    end
+
+    # Infer number of trajectories from the first frame
+    first_frame = frames[1]
+    n_trajectories = if first_frame isa AbstractMatrix
+        s1, s2 = size(first_frame)
+        if s1 == 1
+            s2
+        elseif s2 == 1
+            s1
+        else
+            error("Frame matrices must be 1×N or N×1 for 1D state")
+        end
+    elseif first_frame isa AbstractVector
+        length(first_frame)
+    else
+        error("Unsupported frame type: $(typeof(first_frame)). Expected Vector or Matrix with singleton dimension.")
+    end
+
+    # Determine how many trajectories to plot
+    if n_plot === nothing
+        n_plot = n_trajectories > 500 ? 500 : n_trajectories
+    end
+    n_plot = min(n_plot, n_trajectories)
+
+    # Select random subset if needed
+    indices = if n_plot < n_trajectories
+        sort(shuffle(1:n_trajectories)[1:n_plot])
+    else
+        1:n_trajectories
+    end
+
+    # Helper to extract j-th value from a frame that can be Vector or 1xN / Nx1 Matrix
+    get_value = function(frame, j)
+        if frame isa AbstractMatrix
+            s1, s2 = size(frame)
+            if s1 == 1
+                return frame[1, j]
+            elseif s2 == 1
+                return frame[j, 1]
+            else
+                error("Frame matrices must be 1×N or N×1 for 1D state")
+            end
+        elseif frame isa AbstractVector
+            return frame[j]
+        else
+            error("Unsupported frame type: $(typeof(frame))")
+        end
+    end
+
+    # Create plot
+    p = plot(xlabel="Time", 
+             ylabel="State",
+             legend=legend)
+
+    # Plot each trajectory across time
+    for idx in indices
+        ys = [get_value(frames[t], idx) for t in 1:n_timesteps]
+        plot!(p, tvec, ys, 
+              alpha=alpha, 
+              linewidth=linewidth,
+              color=color,
+              label="")
+    end
+
+    return p
+end
+
 function plot_trajectories_standard(tvec, xttraj; 
                           n_plot=50,
                           alpha=0.3,
                           linewidth=1,
                           color=:blue,
-                          legend=false,
-                          x1_distribution=nothing,
-                          x1_color=:red,
-                          x1_n_points::Integer=200,
-                          x1_scale::Real=0.05,
-                          x1_label::AbstractString="X1 density")
+                          legend=false)
     state_dim, n_trajectories, n_timesteps = size(xttraj)
     
     # For 1D state space
@@ -386,22 +579,6 @@ function plot_trajectories_standard(tvec, xttraj;
               label="")
     end
     
-    # Optionally overlay terminal distribution as vertical curve on the right
-    if x1_distribution !== nothing
-        all_data = vec(xttraj[1, :, :])
-        y_min, y_max = extrema(all_data)
-        y_eval = range(y_min, y_max, length=x1_n_points)
-        dens = pdf.(x1_distribution, y_eval)
-        maxd = maximum(dens)
-        if maxd > 0
-            t_end = maximum(tvec)
-            x_offset = (maximum(tvec) - minimum(tvec)) * x1_scale
-            x_curve = t_end .+ (dens ./ maxd) .* x_offset
-            lab = legend ? x1_label : ""
-            plot!(p, x_curve, y_eval; color=x1_color, linewidth=2, alpha=0.8, label=lab)
-        end
-    end
-
     return p
 end
 
@@ -555,22 +732,6 @@ function plot_quantile_mean_trajectories(tvec, xttraj;
 
         label = string(label_prefix, edges_pct[i+1], "%")
         plot!(p, tvec, mean_traj; linewidth=line_width, alpha=line_alpha, color=line_color, label=label)
-    end
-
-    # Optionally overlay terminal distribution as vertical curve on the right
-    if x1_distribution !== nothing
-        all_data = vec(xttraj[1, :, :])
-        y_min, y_max = extrema(all_data)
-        y_eval = range(y_min, y_max, length=x1_n_points)
-        dens = pdf.(x1_distribution, y_eval)
-        maxd = maximum(dens)
-        if maxd > 0
-            t_end = maximum(tvec)
-            x_offset = (maximum(tvec) - minimum(tvec)) * x1_scale
-            x_curve = t_end .+ (dens ./ maxd) .* x_offset
-            lab = legend ? x1_label : ""
-            plot!(p, x_curve, y_eval; color=x1_color, linewidth=2, alpha=0.8, label=lab)
-        end
     end
 
     return p
